@@ -28,6 +28,15 @@ class SMSManager(private val context: Context) {
         private val _logState = MutableStateFlow(listOf<String>())
         val logState = _logState.asStateFlow()
 
+        private val _messageState = MutableStateFlow(listOf<ChatMessage>())
+        val messageState = _messageState.asStateFlow()
+
+        fun addMessage(msg: ChatMessage) {
+            val current = _messageState.value.toMutableList()
+            current.add(msg)
+            _messageState.value = current
+        }
+
         fun appendLog(msg: String) {
             Log.d("SecureSMS_Protocol", msg)
             val current = _logState.value.toMutableList()
@@ -121,12 +130,14 @@ class SMSManager(private val context: Context) {
                             try {
                                 val encryptedObj = AES.EncryptedMessage.fromBytes(data)
                                 val plain = aes.decryptToString(encryptedObj, key)
+                                addMessage(ChatMessage(plain, isFromMe = false))
                                 showToast("Decrypted from $sender: $plain")
                             } catch (e: Exception) {
                                 // Try the other key if roles are confused
                                 val key2 = AES.keyFromBytes(keys.clientEncryptKey)
                                 val encryptedObj = AES.EncryptedMessage.fromBytes(data)
                                 val plain = aes.decryptToString(encryptedObj, key2)
+                                addMessage(ChatMessage(plain, isFromMe = false))
                                 showToast("Decrypted from $sender: $plain")
                             }
                         }
@@ -151,7 +162,7 @@ class SMSManager(private val context: Context) {
         // Client uses Client Key to encrypt
         val key = AES.keyFromBytes(keys.clientEncryptKey)
         val encrypted = aes.encrypt(message, key)
-
+        addMessage(ChatMessage(message, isFromMe = true))
         val payload = Base64.encodeToString(encrypted.toBytes(), Base64.NO_WRAP)
         sendRawSMS(peerPhone, "MSG:$payload")
         return "Sent"

@@ -69,14 +69,9 @@ fun SecureSMSApp() {
                 }
                 AppDestinations.SEND_SMS -> {
                     SendSMSScreen()
+
                 }
-                AppDestinations.CONFIGURATION -> {
-                    // TODO: Implement Configuration
-                    Text(
-                        text = "Configuration Screen - Coming Soon",
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
+
             }
         }
     }
@@ -88,5 +83,4 @@ enum class AppDestinations(
 ) {
     TESTS("Tests", Icons.Default.Create),
     SEND_SMS("Send SMS", Icons.Default.Send),
-    CONFIGURATION("Configuration", Icons.Default.Settings),
 }
