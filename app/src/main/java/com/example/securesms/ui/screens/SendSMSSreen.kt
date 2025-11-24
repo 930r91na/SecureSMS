@@ -42,13 +42,14 @@ fun SendSMSScreen() {
 
     // Permission launcher
     val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) logs = logs + "SMS Permission Granted"
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions.entries.all { it.value }
+        if (granted) logs = logs + "SMS Permissions Granted"
     }
 
     LaunchedEffect(Unit) {
-        permissionLauncher.launch(Manifest.permission.SEND_SMS)
+        permissionLauncher.launch(arrayOf(Manifest.permission.SEND_SMS, Manifest.permission.RECEIVE_SMS))
         // Generate Identity Key on load
         withContext(Dispatchers.Default) {
             keyPair = RSA.generateKeyPair(2048)

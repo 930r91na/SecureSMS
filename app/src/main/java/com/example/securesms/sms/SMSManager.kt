@@ -1,4 +1,3 @@
-// File: app/src/main/java/com/example/securesms/sms/SMSManager.kt
 package com.example.securesms.sms
 
 import android.Manifest
@@ -7,21 +6,18 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.telephony.SmsManager
 import android.util.Base64
+import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.core.app.ActivityCompat
 import com.example.securesms.crypto.handshake.*
 import com.example.securesms.crypto.models.RSAKeyPair
-import com.example.securesms.crypto.models.RSAPrivateKey
-import com.example.securesms.crypto.models.RSAPublicKey
 import com.example.securesms.crypto.symmetric.AES
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 class SMSManager(private val context: Context) {
 
-    // In a real app, use Dependency Injection. For this demo, we use a static map.
     companion object {
         val handshakes = mutableMapOf<String, TLSHandshake>()
-        // Mocking a consistent Identity Key for the "User" for this session
         var myIdentityKey: RSAKeyPair? = null
     }
 
@@ -42,8 +38,6 @@ class SMSManager(private val context: Context) {
         sendRawSMS(peerPhone, "CL_HELLO:${hello}")
     }
 
-    // Simulate receiving a message (Since we can't really receive on one device easily)
-    // In production, this would be called by SMSReceiver
     fun onReceiveMessage(sender: String, body: String) {
         val parts = body.split(":", limit = 2)
         if (parts.size < 2) return
@@ -51,31 +45,62 @@ class SMSManager(private val context: Context) {
         val type = parts[0]
         val payload = parts[1]
 
-        // Retrieve or create handshake state
+        // Ensure we have a handshake state object for this sender
         var handshake = handshakes[sender]
         if (handshake == null && myIdentityKey != null) {
-            handshake = TLSHandshake(sender, myIdentityKey!!) // Using sender as 'my' phone for symmetry in this mock
+            handshake = TLSHandshake(sender, myIdentityKey!!)
             handshakes[sender] = handshake
         }
 
-        if (handshake == null) return // Can't process without init
+        if (handshake == null) return
 
         try {
             when (type) {
                 "CL_HELLO" -> {
+                    // 1. Receive Client Hello -> Send Server Hello
                     val msg = ClientHelloMessage.fromString(payload)
                     val response = handshake.handleClientHello(msg)
                     sendRawSMS(sender, "SV_HELLO:${response}")
                 }
                 "SV_HELLO" -> {
-                    // Reconstruct objects from string (simplified parsing for demo)
-                    // In real app, proper serialization needed.
-                    // For this demo, we assume the UI drives the flow linearly.
+                    // 2. Receive Server Hello -> Send Client Key Exchange
+                    val msg = ServerHelloMessage.fromString(payload)
+                    val response = handshake.handleServerHello(msg)
+                    sendRawSMS(sender, "CL_KEY_EX:${response}")
                 }
-                // ... handling other states
+                "CL_KEY_EX" -> {
+                    // 3. Receive Client Key Exchange -> Handshake Complete
+                    val msg = ClientKeyExchangeMessage.fromString(payload)
+                    handshake.handleClientKeyExchange(msg)
+                    // Optional: Send "FINISHED" message here if implementing full TLS
+                    showToast("Secure Connection Established with $sender")
+                }
+                "MSG" -> {
+                    // 4. Handle Encrypted Message
+                    val keys = handshake.sessionKeys
+                    if (keys != null) {
+                        val data = Base64.decode(payload, Base64.NO_WRAP)
+                        val aes = AES()
+                        val key = AES.keyFromBytes(keys.serverEncryptKey) // Use server key if we are client?
+                        // Note: In this simple symmetric setup, just ensure you use the correct matching key.
+                        // For simplicity in this demo, we try decrypting.
+                        try {
+                            val encryptedObj = AES.EncryptedMessage.fromBytes(data)
+                            val plain = aes.decryptToString(encryptedObj, key)
+                            showToast("Decrypted from $sender: $plain")
+                        } catch (e: Exception) {
+                            // Try the other key if roles are confused
+                            val key2 = AES.keyFromBytes(keys.clientEncryptKey)
+                            val encryptedObj = AES.EncryptedMessage.fromBytes(data)
+                            val plain = aes.decryptToString(encryptedObj, key2)
+                            showToast("Decrypted from $sender: $plain")
+                        }
+                    }
+                }
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            showToast("Error processing SMS: ${e.message}")
         }
     }
 
@@ -84,6 +109,7 @@ class SMSManager(private val context: Context) {
         val keys = handshake.sessionKeys ?: return "Error: Not established"
 
         val aes = AES()
+        // Client uses Client Key to encrypt
         val key = AES.keyFromBytes(keys.clientEncryptKey)
         val encrypted = aes.encrypt(message, key)
 
@@ -99,5 +125,12 @@ class SMSManager(private val context: Context) {
         val smsManager = getSmsManager()
         val parts = smsManager.divideMessage(text)
         smsManager.sendMultipartTextMessage(phone, null, parts, null, null)
+    }
+
+    private fun showToast(msg: String) {
+        // Must run on main thread
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+        }
     }
 }
