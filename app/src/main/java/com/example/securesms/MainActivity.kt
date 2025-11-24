@@ -9,7 +9,7 @@ import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -23,8 +23,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import com.example.securesms.ui.screens.ECCTestScreen
-import com.example.securesms.ui.screens.RSATestScreen
+import com.example.securesms.ui.screens.TestsScreen
 import com.example.securesms.ui.theme.SecureSMSTheme
 
 class MainActivity : ComponentActivity() {
@@ -43,7 +42,7 @@ class MainActivity : ComponentActivity() {
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @Composable
 fun SecureSMSApp() {
-    var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.RSA_TEST) }
+    var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.TESTS) }
 
     NavigationSuiteScaffold(
         navigationSuiteItems = {
@@ -64,13 +63,8 @@ fun SecureSMSApp() {
     ) {
         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
             when (currentDestination) {
-                AppDestinations.RSA_TEST -> {
-                    RSATestScreen()
-                }
-                AppDestinations.ECCTest -> {
-                    ECCTestScreen(
-                        onBackClick = { currentDestination = AppDestinations.RSA_TEST }
-                    )
+                AppDestinations.TESTS -> {
+                    TestsScreen()
                 }
                 AppDestinations.SEND_SMS -> {
                     // TODO: Implement SendSMSScreen
@@ -79,10 +73,10 @@ fun SecureSMSApp() {
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
-                AppDestinations.SETTINGS -> {
-                    // TODO: Implement Settings
+                AppDestinations.CONFIGURATION -> {
+                    // TODO: Implement Configuration
                     Text(
-                        text = "Settings Screen - Coming Soon",
+                        text = "Configuration Screen - Coming Soon",
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -95,9 +89,7 @@ enum class AppDestinations(
     val label: String,
     val icon: ImageVector,
 ) {
-    RSA_TEST("RSA Test", Icons.Default.Lock),
-
-    ECCTest("ECC Test", Icons.Default.Lock),
+    TESTS("Tests", Icons.Default.Create),
     SEND_SMS("Send SMS", Icons.Default.Send),
-    SETTINGS("Settings", Icons.Default.Settings),
+    CONFIGURATION("Configuration", Icons.Default.Settings),
 }

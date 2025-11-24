@@ -1,4 +1,4 @@
-package com.example.securesms.sms
+/*package com.example.securesms.sms
 
 import android.Manifest
 import android.content.Context
@@ -8,6 +8,8 @@ import android.util.Base64
 import androidx.core.content.ContextCompat
 //import com.example.securesms.crypto.handshake.TLSHandshake
 import com.example.securesms.crypto.models.*
+import com.example.securesms.crypto.symmetric.AES
+import javax.crypto.spec.SecretKeySpec
 
 class SMSManager(private val context: Context) {
 
@@ -49,20 +51,20 @@ class SMSManager(private val context: Context) {
 
         // Encrypt with AES-GCM
         val aes = com.example.securesms.crypto.symmetric.AES()
-        val encryptedData = aes.encryptString(
-            message,
-            javax.crypto.spec.SecretKeySpec(sessionKeys.clientEncryptKey, "AES")
-        )
+        //val encryptedData = aes.encryptString(
+        //    message,
+        //    javax.crypto.spec.SecretKeySpec(sessionKeys.clientEncryptKey, "AES")
+        //)
 
         // Compute HMAC
         val hmac = com.example.securesms.crypto.hash.HMAC()
-        val mac = hmac.compute(sessionKeys.clientMacKey, encryptedData)
+        //val mac = hmac.compute(sessionKeys.clientMacKey, encryptedData)
 
         // Package: [Encrypted Data][HMAC]
-        val payload = encryptedData + mac
+        //val payload = encryptedData + mac
 
         // Encode and send
-        return sendSMS(peerPhone, "DATA", payload)
+        //return sendSMS(peerPhone, "DATA", payload)
     }
 
     private fun sendHandshakeMessage(
@@ -107,3 +109,5 @@ class SMSManager(private val context: Context) {
         ) == PackageManager.PERMISSION_GRANTED
     }
 }
+*/
+
