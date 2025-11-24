@@ -26,6 +26,8 @@ import com.example.securesms.sms.SMSManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @Composable
@@ -36,7 +38,7 @@ fun SendSMSScreen() {
 
     var peerPhone by remember { mutableStateOf("") }
     var messageText by remember { mutableStateOf("") }
-    var logs by remember { mutableStateOf(listOf<String>()) }
+    val logs by SMSManager.logState.collectAsState()
     var keyPair by remember { mutableStateOf<RSAKeyPair?>(null) }
     var isHandshaking by remember { mutableStateOf(false) }
 
@@ -45,7 +47,7 @@ fun SendSMSScreen() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val granted = permissions.entries.all { it.value }
-        if (granted) logs = logs + "SMS Permissions Granted"
+        if (granted) SMSManager.appendLog("SMS Permissions Granted")
     }
 
     LaunchedEffect(Unit) {
@@ -54,7 +56,7 @@ fun SendSMSScreen() {
         withContext(Dispatchers.Default) {
             keyPair = RSA.generateKeyPair(2048)
         }
-        logs = logs + "Identity Key Generated (RSA 2048-bit)"
+        SMSManager.appendLog( "Identity Key Generated (RSA 2048-bit)")
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -75,7 +77,7 @@ fun SendSMSScreen() {
             onClick = {
                 if (keyPair != null && peerPhone.isNotEmpty()) {
                     isHandshaking = true
-                    logs = logs + "Starting Handshake with $peerPhone..."
+                    SMSManager.appendLog("Starting Handshake with $peerPhone...")
 
                     scope.launch(Dispatchers.IO) {
                         try {
@@ -83,12 +85,12 @@ fun SendSMSScreen() {
                             // The receiving, parsing, and state updates happen via SMSReceiver.
                             smsManager.initiateHandshake(peerPhone, "MyPhone", keyPair!!)
                             withContext(Dispatchers.Main) {
-                                logs = logs + ">> ClientHello Sent (Waiting for reply...)"
+                                SMSManager.appendLog(">> ClientHello Sent (Waiting for reply...)")
                                 isHandshaking = false
                             }
                         } catch (e: Exception) {
                             withContext(Dispatchers.Main) {
-                                logs = logs + "Error: ${e.message}"
+                                SMSManager.appendLog(">> Error: ${e.message}")
                             }
                         }
                     }
@@ -114,9 +116,9 @@ fun SendSMSScreen() {
 
         Button(
             onClick = {
-                logs = logs + "Encrypting and sending..."
+                SMSManager.appendLog("Sending Encrypted Message...")
                 val result = smsManager.sendEncryptedMessage(peerPhone, messageText)
-                logs = logs + ">> $result"
+                SMSManager.appendLog("Result: $result")
                 messageText = ""
             },
             modifier = Modifier.fillMaxWidth(),

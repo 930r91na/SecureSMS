@@ -12,13 +12,23 @@ import androidx.core.app.ActivityCompat
 import com.example.securesms.crypto.handshake.*
 import com.example.securesms.crypto.models.RSAKeyPair
 import com.example.securesms.crypto.symmetric.AES
-
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 class SMSManager(private val context: Context) {
 
     companion object {
         val handshakes = mutableMapOf<String, TLSHandshake>()
         var myIdentityKey: RSAKeyPair? = null
+
+        private val _logState = MutableStateFlow(listOf<String>())
+        val logState = _logState.asStateFlow()
+
+        fun appendLog(msg: String) {
+            val current = _logState.value.toMutableList()
+            current.add(msg)
+            _logState.value = current
+        }
     }
 
     private fun getSmsManager(): SmsManager {
@@ -53,6 +63,8 @@ class SMSManager(private val context: Context) {
         }
 
         if (handshake == null) return
+
+        appendLog("<< SMS Received from $sender")
 
         try {
             when (type) {
