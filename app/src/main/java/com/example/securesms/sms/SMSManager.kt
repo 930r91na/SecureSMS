@@ -6,7 +6,7 @@ import android.content.pm.PackageManager
 import android.telephony.SmsManager
 import android.util.Base64
 import androidx.core.content.ContextCompat
-import com.example.securesms.crypto.handshake.TLSHandshake
+//import com.example.securesms.crypto.handshake.TLSHandshake
 import com.example.securesms.crypto.models.*
 
 class SMSManager(private val context: Context) {
@@ -14,7 +14,7 @@ class SMSManager(private val context: Context) {
     private val smsManager = SmsManager.getDefault()
 
     // Active handshakes: phoneNumber -> TLSHandshake
-    private val activeHandshakes = mutableMapOf<String, TLSHandshake>()
+    //private val activeHandshakes = mutableMapOf<String, TLSHandshake>()
 
     // Established sessions: phoneNumber -> SessionKeys
     private val establishedSessions = mutableMapOf<String, SessionKeys>()
@@ -27,14 +27,14 @@ class SMSManager(private val context: Context) {
         myPhone: String,
         myKeyPair: RSAKeyPair
     ) {
-        val handshake = TLSHandshake(myPhone, myKeyPair)
-        activeHandshakes[peerPhone] = handshake
+        //val handshake = TLSHandshake(myPhone, myKeyPair)
+        //activeHandshakes[peerPhone] = handshake
 
         // Generate ClientHello
-        val clientHello = handshake.generateClientHello()
+        //val clientHello = handshake.generateClientHello()
 
         // Send via SMS
-        sendHandshakeMessage(peerPhone, "CLIENT_HELLO", clientHello.toBytes())
+        //sendHandshakeMessage(peerPhone, "CLIENT_HELLO", clientHello.toBytes())
     }
 
     /**

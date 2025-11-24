@@ -1,4 +1,4 @@
-package com.example.securesms.crypto.handshake
+/*package com.example.securesms.crypto.handshake
 
 import com.example.securesms.crypto.asymmetric.DiffieHellman
 import com.example.securesms.crypto.asymmetric.RSA
@@ -301,4 +301,4 @@ class TLSHandshake(
         require(state == HandshakeState.ESTABLISHED) { "Handshake not complete" }
         return sessionKeys!!
     }
-}
+}*/

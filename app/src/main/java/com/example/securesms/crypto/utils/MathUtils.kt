@@ -60,31 +60,6 @@ object MathUtils {
         return (p - BigInteger.ONE) * (q - BigInteger.ONE)
     }
 
-    /**
-     * Find a primitive root modulo prime p
-     * Based on your DH notes
-     */
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-    fun findPrimitiveRoot(p: BigInteger): BigInteger {
-        val phiP = p - BigInteger.ONE
-        val primeFactors = primeFactorize(phiP)
-
-        for (candidate in BigInteger.TWO..p) {
-            var isPrimitiveRoot = true
-
-            for (factor in primeFactors) {
-                val exp = phiP / factor
-                if (modPow(candidate, exp, p) == BigInteger.ONE) {
-                    isPrimitiveRoot = false
-                    break
-                }
-            }
-
-            if (isPrimitiveRoot) return candidate
-        }
-
-        throw IllegalStateException("No primitive root found for $p")
-    }
 
     /**
      * Simple prime factorization (for small numbers in DH setup)
