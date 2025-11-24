@@ -157,13 +157,34 @@ class SMSManager(private val context: Context) {
         return "Sent"
     }
 
-    private fun sendRawSMS(phone: String, text: String) {
+    /*private fun sendRawSMS(phone: String, text: String) {
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
             return
         }
         val smsManager = getSmsManager()
         val parts = smsManager.divideMessage(text)
         smsManager.sendMultipartTextMessage(phone, null, parts, null, null)
+    }*/
+
+    private fun sendRawSMS(phone: String, text: String) {
+        // 1. Log the "Cheat Code" for manual relay
+        // This prints the exact command you need to paste into the terminal
+        Log.e("SecureSMS_Manual", ">>> RUN THIS COMMAND TO DELIVER MESSAGE:")
+        Log.e("SecureSMS_Manual", "adb -s emulator-$phone emu sms send 1234 \"$text\"")
+
+        // 2. Attempt real sending (in case it decides to work)
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
+            appendLog("Error: Send Permission missing")
+            return
+        }
+        try {
+            val smsManager = getSmsManager()
+            val parts = smsManager.divideMessage(text)
+            smsManager.sendMultipartTextMessage(phone, null, parts, null, null)
+            appendLog(">> Message sent to network (Routing...)")
+        } catch (e: Exception) {
+            appendLog("Error sending SMS: ${e.message}")
+        }
     }
 
     private fun showToast(msg: String) {
