@@ -56,6 +56,8 @@ fun SendSMSScreen() {
         withContext(Dispatchers.Default) {
             keyPair = RSA.generateKeyPair(2048)
         }
+
+        SMSManager.myIdentityKey = keyPair
         SMSManager.appendLog( "Identity Key Generated (RSA 2048-bit)")
     }
 

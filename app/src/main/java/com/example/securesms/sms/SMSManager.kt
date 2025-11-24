@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.telephony.SmsManager
 import android.util.Base64
+import android.util.Log
 import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.core.app.ActivityCompat
@@ -14,6 +15,9 @@ import com.example.securesms.crypto.models.RSAKeyPair
 import com.example.securesms.crypto.symmetric.AES
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 class SMSManager(private val context: Context) {
 
@@ -25,6 +29,7 @@ class SMSManager(private val context: Context) {
         val logState = _logState.asStateFlow()
 
         fun appendLog(msg: String) {
+            Log.d("SecureSMS_Protocol", msg)
             val current = _logState.value.toMutableList()
             current.add(msg)
             _logState.value = current
@@ -48,71 +53,93 @@ class SMSManager(private val context: Context) {
         sendRawSMS(peerPhone, "CL_HELLO:${hello}")
     }
 
+
     fun onReceiveMessage(sender: String, body: String) {
-        val parts = body.split(":", limit = 2)
-        if (parts.size < 2) return
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                appendLog("<< SMS Received from $sender")
+                Log.d("SecureSMS_Protocol", "Processing message on background thread...")
 
-        val type = parts[0]
-        val payload = parts[1]
+                // 1. Retrieve or create handshake state
+                var handshake = handshakes[sender]
 
-        // Ensure we have a handshake state object for this sender
-        var handshake = handshakes[sender]
-        if (handshake == null && myIdentityKey != null) {
-            handshake = TLSHandshake(sender, myIdentityKey!!)
-            handshakes[sender] = handshake
-        }
-
-        if (handshake == null) return
-
-        appendLog("<< SMS Received from $sender")
-
-        try {
-            when (type) {
-                "CL_HELLO" -> {
-                    // 1. Receive Client Hello -> Send Server Hello
-                    val msg = ClientHelloMessage.fromString(payload)
-                    val response = handshake.handleClientHello(msg)
-                    sendRawSMS(sender, "SV_HELLO:${response}")
+                // Check Identity Key
+                if (myIdentityKey == null) {
+                    appendLog("Error: Identity Key is NULL. Did you click 'Initiate'?")
+                    return@launch
                 }
-                "SV_HELLO" -> {
-                    // 2. Receive Server Hello -> Send Client Key Exchange
-                    val msg = ServerHelloMessage.fromString(payload)
-                    val response = handshake.handleServerHello(msg)
-                    sendRawSMS(sender, "CL_KEY_EX:${response}")
+
+                if (handshake == null) {
+                    Log.d("SecureSMS_Protocol", "Creating new handshake session for $sender")
+                    handshake = TLSHandshake(sender, myIdentityKey!!)
+                    handshakes[sender] = handshake
                 }
-                "CL_KEY_EX" -> {
-                    // 3. Receive Client Key Exchange -> Handshake Complete
-                    val msg = ClientKeyExchangeMessage.fromString(payload)
-                    handshake.handleClientKeyExchange(msg)
-                    // Optional: Send "FINISHED" message here if implementing full TLS
-                    showToast("Secure Connection Established with $sender")
+
+                // 2. Parse Message
+                val parts = body.split(":", limit = 2)
+                if (parts.size < 2) {
+                    appendLog("Ignored: Unknown format (no colon)")
+                    return@launch
                 }
-                "MSG" -> {
-                    // 4. Handle Encrypted Message
-                    val keys = handshake.sessionKeys
-                    if (keys != null) {
-                        val data = Base64.decode(payload, Base64.NO_WRAP)
-                        val aes = AES()
-                        val key = AES.keyFromBytes(keys.serverEncryptKey) // Use server key if we are client?
-                        // Note: In this simple symmetric setup, just ensure you use the correct matching key.
-                        // For simplicity in this demo, we try decrypting.
-                        try {
-                            val encryptedObj = AES.EncryptedMessage.fromBytes(data)
-                            val plain = aes.decryptToString(encryptedObj, key)
-                            showToast("Decrypted from $sender: $plain")
-                        } catch (e: Exception) {
-                            // Try the other key if roles are confused
-                            val key2 = AES.keyFromBytes(keys.clientEncryptKey)
-                            val encryptedObj = AES.EncryptedMessage.fromBytes(data)
-                            val plain = aes.decryptToString(encryptedObj, key2)
-                            showToast("Decrypted from $sender: $plain")
+
+                // CRITICAL FIX: .trim() removes invisible spaces/newlines that break the match
+                val type = parts[0].trim()
+                val payload = parts[1].trim()
+
+                Log.d("SecureSMS_Protocol", "Message Type: '$type'") // Debug log to see what we got
+
+                when (type) {
+                    "CL_HELLO" -> {
+                        appendLog("Generating ServerHello (Crypto Heavy)...")
+                        val msg = ClientHelloMessage.fromString(payload)
+                        val response = handshake.handleClientHello(msg)
+                        sendRawSMS(sender, "SV_HELLO:${response}")
+                        appendLog(">> ServerHello Sent")
+                    }
+                    "SV_HELLO" -> {
+                        appendLog("Processing ServerHello...")
+                        val msg = ServerHelloMessage.fromString(payload)
+                        val response = handshake.handleServerHello(msg)
+                        sendRawSMS(sender, "CL_KEY_EX:${response}")
+                        appendLog(">> ClientKeyExchange Sent")
+                    }
+                    "CL_KEY_EX" -> {
+                        appendLog("Processing ClientKeyExchange...")
+                        val msg = ClientKeyExchangeMessage.fromString(payload)
+                        handshake.handleClientKeyExchange(msg)
+                        appendLog("SECURE HANDSHAKE COMPLETE!")
+                    }
+                    "MSG" -> {
+                        // 4. Handle Encrypted Message
+                        val keys = handshake.sessionKeys
+                        if (keys != null) {
+                            val data = Base64.decode(payload, Base64.NO_WRAP)
+                            val aes = AES()
+                            val key = AES.keyFromBytes(keys.serverEncryptKey) // Use server key if we are client?
+                            // Note: In this simple symmetric setup, just ensure you use the correct matching key.
+                            // For simplicity in this demo, we try decrypting.
+                            try {
+                                val encryptedObj = AES.EncryptedMessage.fromBytes(data)
+                                val plain = aes.decryptToString(encryptedObj, key)
+                                showToast("Decrypted from $sender: $plain")
+                            } catch (e: Exception) {
+                                // Try the other key if roles are confused
+                                val key2 = AES.keyFromBytes(keys.clientEncryptKey)
+                                val encryptedObj = AES.EncryptedMessage.fromBytes(data)
+                                val plain = aes.decryptToString(encryptedObj, key2)
+                                showToast("Decrypted from $sender: $plain")
+                            }
                         }
                     }
+                    else -> {
+                        appendLog("Error: Unknown message type '$type'")
+                    }
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                appendLog("Error: ${e.message}")
+                Log.e("SecureSMS_Protocol", "Crash in receiver", e)
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            showToast("Error processing SMS: ${e.message}")
         }
     }
 
