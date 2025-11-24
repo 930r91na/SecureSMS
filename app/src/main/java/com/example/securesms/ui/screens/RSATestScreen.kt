@@ -259,38 +259,5 @@ fun RSATestScreen() {
                 )
             }
         }
-
-        // Info Section
-        Card(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    text = "ℹ️ How RSA Works:",
-                    style = MaterialTheme.typography.titleSmall
-                )
-                Text(
-                    text = "• Public Key (e, n): Used to encrypt",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Text(
-                    text = "• Private Key (d, n): Used to decrypt",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Text(
-                    text = "• Encryption: C = M^e mod n",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace
-                )
-                Text(
-                    text = "• Decryption: M = C^d mod n",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-        }
     }
 }

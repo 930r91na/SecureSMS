@@ -2,6 +2,8 @@ package com.example.securesms.crypto.utils
 
 import android.os.Build
 import androidx.annotation.RequiresApi
+import com.example.securesms.crypto.models.ECCCurve
+import com.example.securesms.crypto.models.ECCPoint
 import java.math.BigInteger
 
 object MathUtils {
