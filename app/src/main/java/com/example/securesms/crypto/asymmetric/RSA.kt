@@ -7,6 +7,7 @@ import java.math.BigInteger
 import java.security.SecureRandom
 import com.example.securesms.crypto.models.RSAPrivateKey
 import com.example.securesms.crypto.models.RSAPublicKey
+import com.example.securesms.crypto.models.RSAKeyPair
 
 /**
  * RSA Implementation based on cryptography fundamentals
@@ -35,7 +36,7 @@ class RSA {
          * @param bitLength Key size in bits (e.g., 1024, 2048, 4096)
          * @return Pair of (publicKey, privateKey)
          */
-        fun generateKeyPair(bitLength: Int = 2048): Pair<RSAPublicKey, RSAPrivateKey> {
+        fun generateKeyPair(bitLength: Int = 2048): RSAKeyPair {
             val random = SecureRandom()
 
             // Generate two distinct primes
@@ -64,10 +65,11 @@ class RSA {
             // Compute private exponent d = e^-1 mod φ(n)
             val d = MathUtils.modularInverse(e, phi)
 
-            return Pair(
-                RSAPublicKey(e, n),
-                RSAPrivateKey(d, n, p, q)
-            )
+
+            // Create RSAKeyPair
+
+            return RSAKeyPair(RSAPublicKey(e, n), RSAPrivateKey(d, n, p, q))
+
         }
 
         /**

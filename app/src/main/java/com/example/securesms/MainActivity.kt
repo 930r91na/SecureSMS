@@ -23,6 +23,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.example.securesms.ui.screens.SendSMSScreen
 import com.example.securesms.ui.screens.TestsScreen
 import com.example.securesms.ui.theme.SecureSMSTheme
 
@@ -67,11 +68,7 @@ fun SecureSMSApp() {
                     TestsScreen()
                 }
                 AppDestinations.SEND_SMS -> {
-                    // TODO: Implement SendSMSScreen
-                    Text(
-                        text = "Send SMS Screen - Coming Soon",
-                        modifier = Modifier.padding(innerPadding)
-                    )
+                    SendSMSScreen()
                 }
                 AppDestinations.CONFIGURATION -> {
                     // TODO: Implement Configuration

@@ -1,304 +1,168 @@
-/*package com.example.securesms.crypto.handshake
+// File: app/src/main/java/com/example/securesms/crypto/handshake/TLSHandshake.kt
+package com.example.securesms.crypto.handshake
 
-import com.example.securesms.crypto.asymmetric.DiffieHellman
+import android.os.Build
+import androidx.annotation.RequiresApi
+import com.example.securesms.crypto.asymmetric.ECC
 import com.example.securesms.crypto.asymmetric.RSA
 import com.example.securesms.crypto.hash.HMAC
 import com.example.securesms.crypto.hash.SHA256
 import com.example.securesms.crypto.models.*
 import com.example.securesms.crypto.symmetric.KeyDerivation
+import com.example.securesms.crypto.utils.MathUtils
 import java.math.BigInteger
 import java.security.SecureRandom
+import java.util.Base64
 
-/**
- * TLS-Style Handshake over SMS
- *
- * Implements the complete handshake flow:
- * 1. ClientHello
- * 2. ServerHello + Certificate
- * 3. ClientKeyExchange + Certificate
- * 4. Key Derivation
- * 5. Finished Messages
- * 6. Secure Channel Established
- */
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
 class TLSHandshake(
     private val myPhoneNumber: String,
-    private val myKeyPair: RSAKeyPair
+    private val myIdentityKeyPair: RSAKeyPair
 ) {
-
-    private val dh = DiffieHellman()
-    private val rsa = RSA()
-    private val kdf = KeyDerivation()
+    private val ecc = ECC()
     private val sha256 = SHA256()
     private val hmac = HMAC()
+    private val kdf = KeyDerivation()
     private val certManager = CertificateManager()
     private val random = SecureRandom()
 
-    // Handshake state
-    private var state = HandshakeState.IDLE
+    // State
+    var state = HandshakeState.IDLE
+        private set
+
+    // Handshake Data
     private var clientRandom: ByteArray? = null
     private var serverRandom: ByteArray? = null
-    private var dhParameters: DHParameters? = null
-    private var myDHPrivateKey: BigInteger? = null
-    private var myDHPublicKey: BigInteger? = null
-    private var peerDHPublicKey: BigInteger? = null
-    private var preMasterSecret: BigInteger? = null
+    private var myEphemeralKeyPair: ECCKeyPair? = null
+    private var peerEphemeralPublicKey: ECCPoint? = null
+    private var peerIdentityKey: RSAPublicKey? = null
+
     private var masterSecret: ByteArray? = null
-    private var sessionKeys: SessionKeys? = null
+    var sessionKeys: SessionKeys? = null
+        private set
 
-    // Message history for Finished message verification
-    private val handshakeMessages = mutableListOf<ByteArray>()
+    // Transcript for integrity check
+    private val transcript = StringBuilder()
 
-    /**
-     * Step 1: CLIENT - Initiate handshake
-     * Generate ClientHello message
-     */
+    /** CLIENT: Step 1 - Generate ClientHello */
     fun generateClientHello(): ClientHelloMessage {
-        require(state == HandshakeState.IDLE) { "Invalid state for ClientHello" }
+        check(state == HandshakeState.IDLE)
 
-        // Generate random nonce
         clientRandom = ByteArray(32).apply { random.nextBytes(this) }
+        val msg = ClientHelloMessage(clientRandom!!, listOf("TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA256"))
 
-        // Generate DH parameters
-        dhParameters = DHParameters.rfc3526Group14() // Standard 2048-bit group
-
-        // Cipher suites we support
-        val cipherSuites = listOf(
-            "ECDHE-RSA-AES256-GCM-SHA256",
-            "DHE-RSA-AES256-GCM-SHA256"
-        )
-
-        val message = ClientHelloMessage(
-            clientRandom = clientRandom!!,
-            cipherSuites = cipherSuites,
-            dhParameters = dhParameters!!
-        )
-
-        // Record for Finished verification
-        handshakeMessages.add(message.toBytes())
-
+        transcript.append(msg.toString())
         state = HandshakeState.CLIENT_HELLO_SENT
-
-        return message
+        return msg
     }
 
-    /**
-     * Step 2: SERVER - Respond to ClientHello
-     * Generate ServerHello + Certificate + DH Public Key
-     */
-    fun generateServerHello(clientHello: ClientHelloMessage): ServerHelloMessage {
-        require(state == HandshakeState.IDLE) { "Invalid state for ServerHello" }
+    /** SERVER: Step 2 - Process ClientHello, Generate ServerHello */
+    fun handleClientHello(msg: ClientHelloMessage): ServerHelloMessage {
+        check(state == HandshakeState.IDLE)
 
-        // Record client hello
-        handshakeMessages.add(clientHello.toBytes())
-        clientRandom = clientHello.clientRandom
-        dhParameters = clientHello.dhParameters
+        clientRandom = msg.clientRandom
+        transcript.append(msg.toString())
 
-        // Generate server random
         serverRandom = ByteArray(32).apply { random.nextBytes(this) }
 
-        // Select cipher suite (first one for simplicity)
-        val selectedCipher = clientHello.cipherSuites.first()
+        // Generate Ephemeral ECDH Key
+        myEphemeralKeyPair = ECC.generateKeyPair(ECC.getSecureCurve())
+        val myCert = certManager.generateSelfSignedCertificate(myPhoneNumber, myIdentityKeyPair)
 
-        // Generate our DH key pair
-        myDHPrivateKey = dh.generatePrivateKey(dhParameters!!)
-        myDHPublicKey = dh.generatePublicKey(myDHPrivateKey!!, dhParameters!!)
+        // Sign the params (Authentication)
+        val paramsToSign = clientRandom!! + serverRandom!! + myEphemeralKeyPair!!.publicKey.Q.x.toByteArray()
+        val hash = sha256.hash(paramsToSign)
+        val sigInt = MathUtils.modPow(BigInteger(1, hash), myIdentityKeyPair.privateKey.d, myIdentityKeyPair.privateKey.n)
 
-        // Generate self-signed certificate
-        val certificate = certManager.generateSelfSignedCertificate(
-            myPhoneNumber,
-            myKeyPair
+        val serverHello = ServerHelloMessage(
+            serverRandom!!, myCert, myEphemeralKeyPair!!.publicKey.Q, sigInt.toByteArray()
         )
 
-        val message = ServerHelloMessage(
-            serverRandom = serverRandom!!,
-            selectedCipher = selectedCipher,
-            certificate = certificate,
-            dhPublicKey = myDHPublicKey!!
-        )
-
-        // Record for verification
-        handshakeMessages.add(message.toBytes())
-
+        transcript.append(serverHello.toString())
         state = HandshakeState.SERVER_HELLO_SENT
-
-        return message
+        return serverHello
     }
 
-    /**
-     * Step 3: CLIENT - Process ServerHello and generate ClientKeyExchange
-     */
-    fun generateClientKeyExchange(
-        serverHello: ServerHelloMessage
-    ): ClientKeyExchangeMessage {
-        require(state == HandshakeState.CLIENT_HELLO_SENT) { "Invalid state" }
+    /** CLIENT: Step 3 - Process ServerHello, Generate KeyExchange */
+    fun handleServerHello(msg: ServerHelloMessage): ClientKeyExchangeMessage {
+        check(state == HandshakeState.CLIENT_HELLO_SENT)
+        transcript.append(msg.toString())
 
-        // Record server hello
-        handshakeMessages.add(serverHello.toBytes())
+        serverRandom = msg.serverRandom
+        peerIdentityKey = msg.certificate.publicKey
+        peerEphemeralPublicKey = msg.ephemeralPublicKey
 
-        // Verify server certificate
-        require(certManager.verifyCertificate(serverHello.certificate)) {
-            "Server certificate verification failed"
-        }
+        // Verify Certificate
+        if (!certManager.verifyCertificate(msg.certificate)) throw SecurityException("Invalid Server Cert")
 
-        // Store server's DH public key
-        peerDHPublicKey = serverHello.dhPublicKey
-        serverRandom = serverHello.serverRandom
+        // Verify Signature (Auth)
+        val paramsSigned = clientRandom!! + serverRandom!! + peerEphemeralPublicKey!!.x.toByteArray()
+        val hashToCheck = sha256.hash(paramsSigned)
+        val sigInt = BigInteger(1, msg.signature)
+        val decryptedHash = MathUtils.modPow(sigInt, peerIdentityKey!!.e, peerIdentityKey!!.n)
+        if (decryptedHash != BigInteger(1, hashToCheck)) throw SecurityException("Server Signature Invalid")
 
-        // Generate our DH key pair
-        myDHPrivateKey = dh.generatePrivateKey(dhParameters!!)
-        myDHPublicKey = dh.generatePublicKey(myDHPrivateKey!!, dhParameters!!)
+        // Generate Client Ephemeral Key
+        myEphemeralKeyPair = ECC.generateKeyPair(ECC.getSecureCurve())
+        val myCert = certManager.generateSelfSignedCertificate(myPhoneNumber, myIdentityKeyPair)
 
-        // Compute Pre-Master Secret (DH shared secret)
-        preMasterSecret = dh.computeSharedSecret(
-            myDHPrivateKey!!,
-            peerDHPublicKey!!,
-            dhParameters!!
-        )
+        // Compute Shared Secret
+        val sharedPoint = ecc.generateSharedSecret(myEphemeralKeyPair!!.privateKey, ECCPublicKey(peerEphemeralPublicKey!!, myEphemeralKeyPair!!.publicKey.curve))
+        deriveKeys(sharedPoint)
 
-        // Derive Master Secret
-        masterSecret = kdf.deriveMasterSecret(
-            preMasterSecret!!.toByteArray(),
-            clientRandom!!,
-            serverRandom!!
-        )
+        // Sign parameters
+        val paramsToSign = clientRandom!! + serverRandom!! + myEphemeralKeyPair!!.publicKey.Q.x.toByteArray()
+        val myHash = sha256.hash(paramsToSign)
+        val mySig = MathUtils.modPow(BigInteger(1, myHash), myIdentityKeyPair.privateKey.d, myIdentityKeyPair.privateKey.n)
 
-        // Derive Session Keys
-        sessionKeys = kdf.deriveSessionKeys(
-            masterSecret!!,
-            clientRandom!!,
-            serverRandom!!
-        )
-
-        // Generate our certificate
-        val certificate = certManager.generateSelfSignedCertificate(
-            myPhoneNumber,
-            myKeyPair
-        )
-
-        // Sign DH public key for authentication
-        val dhPubKeyHash = sha256.hash(myDHPublicKey!!.toByteArray())
-        val signature = rsa.sign(BigInteger(1, dhPubKeyHash), myKeyPair.privateKey)
-
-        val message = ClientKeyExchangeMessage(
-            certificate = certificate,
-            dhPublicKey = myDHPublicKey!!,
-            signature = signature.toByteArray()
-        )
-
-        handshakeMessages.add(message.toBytes())
-        state = HandshakeState.CLIENT_KEY_EXCHANGE_SENT
-
-        return message
+        val cke = ClientKeyExchangeMessage(myCert, myEphemeralKeyPair!!.publicKey.Q, mySig.toByteArray())
+        transcript.append(cke.toString())
+        state = HandshakeState.KEYS_DERIVED
+        return cke
     }
 
-    /**
-     * Step 4: SERVER - Process ClientKeyExchange
-     */
-    fun processClientKeyExchange(clientKeyExchange: ClientKeyExchangeMessage) {
-        require(state == HandshakeState.SERVER_HELLO_SENT) { "Invalid state" }
+    /** SERVER: Step 4 - Process Client KeyExchange */
+    fun handleClientKeyExchange(msg: ClientKeyExchangeMessage) {
+        check(state == HandshakeState.SERVER_HELLO_SENT)
+        transcript.append(msg.toString())
 
-        // Record message
-        handshakeMessages.add(clientKeyExchange.toBytes())
+        peerIdentityKey = msg.certificate.publicKey
+        peerEphemeralPublicKey = msg.ephemeralPublicKey
 
-        // Verify client certificate
-        require(certManager.verifyCertificate(clientKeyExchange.certificate)) {
-            "Client certificate verification failed"
-        }
+        if (!certManager.verifyCertificate(msg.certificate)) throw SecurityException("Invalid Client Cert")
 
-        // Verify signature on DH public key
-        val dhPubKeyHash = sha256.hash(clientKeyExchange.dhPublicKey.toByteArray())
-        require(rsa.verify(
-            BigInteger(1, dhPubKeyHash),
-            BigInteger(1, clientKeyExchange.signature),
-            clientKeyExchange.certificate.publicKey
-        )) {
-            "DH public key signature verification failed"
-        }
+        // Verify Signature
+        val paramsSigned = clientRandom!! + serverRandom!! + peerEphemeralPublicKey!!.x.toByteArray()
+        val hashToCheck = sha256.hash(paramsSigned)
+        val sigInt = BigInteger(1, msg.signature)
+        val decryptedHash = MathUtils.modPow(sigInt, peerIdentityKey!!.e, peerIdentityKey!!.n)
+        if (decryptedHash != BigInteger(1, hashToCheck)) throw SecurityException("Client Signature Invalid")
 
-        // Store peer's DH public key
-        peerDHPublicKey = clientKeyExchange.dhPublicKey
-
-        // Compute Pre-Master Secret
-        preMasterSecret = dh.computeSharedSecret(
-            myDHPrivateKey!!,
-            peerDHPublicKey!!,
-            dhParameters!!
-        )
-
-        // Derive Master Secret
-        masterSecret = kdf.deriveMasterSecret(
-            preMasterSecret!!.toByteArray(),
-            clientRandom!!,
-            serverRandom!!
-        )
-
-        // Derive Session Keys
-        sessionKeys = kdf.deriveSessionKeys(
-            masterSecret!!,
-            clientRandom!!,
-            serverRandom!!
-        )
+        // Compute Shared Secret
+        val sharedPoint = ecc.generateSharedSecret(myEphemeralKeyPair!!.privateKey, ECCPublicKey(peerEphemeralPublicKey!!, myEphemeralKeyPair!!.publicKey.curve))
+        deriveKeys(sharedPoint)
 
         state = HandshakeState.KEYS_DERIVED
     }
 
-    /**
-     * Step 5: Generate Finished message
-     * Contains HMAC of all handshake messages
-     */
-    fun generateFinished(isClient: Boolean): FinishedMessage {
-        require(state == HandshakeState.CLIENT_KEY_EXCHANGE_SENT ||
-                state == HandshakeState.KEYS_DERIVED) { "Invalid state" }
+    private fun deriveKeys(sharedPoint: ECCPoint) {
+        // Use x-coordinate of shared secret as per standard ECDH
+        val preMasterSecret = sharedPoint.x.toByteArray()
 
-        // Concatenate all handshake messages
-        val allMessages = handshakeMessages.fold(ByteArray(0)) { acc, msg -> acc + msg }
+        // Derive Master Secret
+        masterSecret = kdf.deriveMasterSecret(preMasterSecret, clientRandom!!, serverRandom!!)
 
-        // Select appropriate MAC key
-        val macKey = if (isClient) {
-            sessionKeys!!.clientMacKey
-        } else {
-            sessionKeys!!.serverMacKey
-        }
-
-        // Compute HMAC
-        val verifyData = hmac.compute(macKey, allMessages)
-
-        val message = FinishedMessage(verifyData)
-
-        state = HandshakeState.FINISHED_SENT
-
-        return message
+        // Derive Session Keys
+        sessionKeys = kdf.deriveSessionKeys(masterSecret!!, clientRandom!!, serverRandom!!)
     }
 
-    /**
-     * Step 6: Verify Finished message from peer
-     */
-    fun verifyFinished(finished: FinishedMessage, isClient: Boolean): Boolean {
-        // Concatenate all handshake messages
-        val allMessages = handshakeMessages.fold(ByteArray(0)) { acc, msg -> acc + msg }
-
-        // Select appropriate MAC key (opposite of sender)
-        val macKey = if (!isClient) {
-            sessionKeys!!.clientMacKey
-        } else {
-            sessionKeys!!.serverMacKey
-        }
-
-        // Verify HMAC
-        val valid = hmac.verify(macKey, allMessages, finished.verifyData)
-
-        if (valid) {
-            state = HandshakeState.ESTABLISHED
-        }
-
-        return valid
+    /** Generate Finished Message (HMAC of transcript) */
+    fun generateFinished(): FinishedMessage {
+        val transcriptBytes = transcript.toString().toByteArray()
+        // Client uses Client MAC key, Server uses Server MAC key
+        val key = if(state == HandshakeState.KEYS_DERIVED) sessionKeys!!.clientMacKey else sessionKeys!!.serverMacKey
+        val verifyData = hmac.compute(key, transcriptBytes)
+        state = HandshakeState.ESTABLISHED
+        return FinishedMessage(verifyData)
     }
-
-    /**
-     * Get the established session keys
-     */
-    fun getSessionKeys(): SessionKeys {
-        require(state == HandshakeState.ESTABLISHED) { "Handshake not complete" }
-        return sessionKeys!!
-    }
-}*/
+}
