@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.telephony.SmsMessage
+import android.util.Log
 import androidx.annotation.RequiresApi
 
 class SMSReceiver : BroadcastReceiver() {
@@ -15,19 +16,28 @@ class SMSReceiver : BroadcastReceiver() {
             val pdus = bundle?.get("pdus") as? Array<*>
             val format = bundle?.getString("format")
 
-            pdus?.forEach { pdu ->
-                val sms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    SmsMessage.createFromPdu(pdu as ByteArray, format)
-                } else {
-                    SmsMessage.createFromPdu(pdu as ByteArray)
+            if (pdus != null) {
+                // FIXED: Use StringBuilder to stitch multipart messages back together
+                val fullMessage = StringBuilder()
+                var sender = ""
+
+                for (pdu in pdus) {
+                    val sms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        SmsMessage.createFromPdu(pdu as ByteArray, format)
+                    } else {
+                        SmsMessage.createFromPdu(pdu as ByteArray)
+                    }
+
+                    fullMessage.append(sms.messageBody)
+                    sender = sms.displayOriginatingAddress ?: sender
                 }
 
-                val sender = sms.displayOriginatingAddress
-                val body = sms.messageBody
+                val finalBody = fullMessage.toString()
+                Log.d("SecureSMS", "Reassembled SMS from $sender: $finalBody")
 
-                // Forward to SMSManager
+                // Forward the COMPLETE message to SMSManager
                 val smsManager = SMSManager(context)
-                smsManager.onReceiveMessage(sender ?: "", body)
+                smsManager.onReceiveMessage(sender, finalBody)
             }
         }
     }
