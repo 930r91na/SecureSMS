@@ -11,19 +11,26 @@ import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.core.app.ActivityCompat
 import com.example.securesms.crypto.handshake.*
-import com.example.securesms.crypto.models.RSAKeyPair
 import com.example.securesms.crypto.symmetric.AES
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import AuthenticationProvider
+
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 class SMSManager(private val context: Context) {
 
     companion object {
+        // Store handshakes per peer phone number
         val handshakes = mutableMapOf<String, TLSHandshake>()
-        var myIdentityKey: RSAKeyPair? = null
+
+        // Store the authentication provider (RSA or ECDSA)
+        var authProvider: AuthenticationProvider? = null
+
+        // My phone number
+        var myPhoneNumber: String? = null
 
         private val _logState = MutableStateFlow(listOf<String>())
         val logState = _logState.asStateFlow()
@@ -53,15 +60,44 @@ class SMSManager(private val context: Context) {
         }
     }
 
-    fun initiateHandshake(peerPhone: String, myPhone: String, keyPair: RSAKeyPair) {
-        myIdentityKey = keyPair
-        val handshake = TLSHandshake(myPhone, keyPair)
-        handshakes[peerPhone] = handshake
-
-        val hello = handshake.generateClientHello()
-        sendRawSMS(peerPhone, "CL_HELLO:${hello}")
+    /**
+     * Initialize the authentication provider
+     * Call this once at app startup with your chosen algorithm
+     *
+     * Example:
+     *   val rsaAuth = RSAAuthProvider(2048)
+     *   smsManager.initializeAuth("1234567890", rsaAuth)
+     *
+     * Or with ECDSA:
+     *   val ecdsaAuth = ECDSAAuthProvider(ECDSAAuthProvider.CurveType.P256)
+     *   smsManager.initializeAuth("1234567890", ecdsaAuth)
+     */
+    fun initializeAuth(myPhone: String, provider: AuthenticationProvider) {
+        myPhoneNumber = myPhone
+        authProvider = provider
+        appendLog("Initialized with ${provider.algorithm}")
     }
 
+    /**
+     * Initiate handshake with peer
+     * @param peerPhone Peer's phone number
+     */
+    fun initiateHandshake(peerPhone: String) {
+        // Check if initialized
+        if (authProvider == null || myPhoneNumber == null) {
+            appendLog("Error: Call initializeAuth() first!")
+            return
+        }
+
+        // Create new handshake with the authentication provider
+        val handshake = TLSHandshake(myPhoneNumber!!, authProvider!!)
+        handshakes[peerPhone] = handshake
+
+        // Generate and send ClientHello
+        val hello = handshake.generateClientHello()
+        sendRawSMS(peerPhone, "CL_HELLO:${hello}")
+        appendLog(">> ClientHello sent to $peerPhone")
+    }
 
     fun onReceiveMessage(sender: String, body: String) {
         CoroutineScope(Dispatchers.IO).launch {
@@ -69,42 +105,44 @@ class SMSManager(private val context: Context) {
                 appendLog("<< SMS Received from $sender")
                 Log.d("SecureSMS_Protocol", "Processing message on background thread...")
 
-                // 1. Retrieve or create handshake state
-                var handshake = handshakes[sender]
-
-                // Check Identity Key
-                if (myIdentityKey == null) {
-                    appendLog("Error: Identity Key is NULL. Did you click 'Initiate'?")
+                // Check if authentication is initialized
+                if (authProvider == null || myPhoneNumber == null) {
+                    appendLog("Error: Authentication not initialized. Call initializeAuth() first!")
                     return@launch
                 }
 
+                // Retrieve or create handshake state
+                var handshake = handshakes[sender]
+
                 if (handshake == null) {
                     Log.d("SecureSMS_Protocol", "Creating new handshake session for $sender")
-                    handshake = TLSHandshake(sender, myIdentityKey!!)
+                    handshake = TLSHandshake(myPhoneNumber!!, authProvider!!)
                     handshakes[sender] = handshake
                 }
 
-                // 2. Parse Message
+                // Parse Message
                 val parts = body.split(":", limit = 2)
                 if (parts.size < 2) {
                     appendLog("Ignored: Unknown format (no colon)")
                     return@launch
                 }
 
-                // CRITICAL FIX: .trim() removes invisible spaces/newlines that break the match
+                // Remove whitespace that can break parsing
                 val type = parts[0].trim()
                 val payload = parts[1].trim()
 
-                Log.d("SecureSMS_Protocol", "Message Type: '$type'") // Debug log to see what we got
+                Log.d("SecureSMS_Protocol", "Message Type: '$type'")
 
                 when (type) {
                     "CL_HELLO" -> {
+                        appendLog("Processing ClientHello...")
                         appendLog("Generating ServerHello (Crypto Heavy)...")
                         val msg = ClientHelloMessage.fromString(payload)
                         val response = handshake.handleClientHello(msg)
                         sendRawSMS(sender, "SV_HELLO:${response}")
                         appendLog(">> ServerHello Sent")
                     }
+
                     "SV_HELLO" -> {
                         appendLog("Processing ServerHello...")
                         val msg = ServerHelloMessage.fromString(payload)
@@ -112,36 +150,49 @@ class SMSManager(private val context: Context) {
                         sendRawSMS(sender, "CL_KEY_EX:${response}")
                         appendLog(">> ClientKeyExchange Sent")
                     }
+
                     "CL_KEY_EX" -> {
                         appendLog("Processing ClientKeyExchange...")
                         val msg = ClientKeyExchangeMessage.fromString(payload)
                         handshake.handleClientKeyExchange(msg)
-                        appendLog("SECURE HANDSHAKE COMPLETE!")
+                        appendLog("✅ SECURE HANDSHAKE COMPLETE!")
+                        appendLog("Algorithm: ${handshake.getAuthAlgorithm()}")
                     }
+
                     "MSG" -> {
-                        // 4. Handle Encrypted Message
+                        // Handle Encrypted Message
                         val keys = handshake.sessionKeys
                         if (keys != null) {
                             val data = Base64.decode(payload, Base64.NO_WRAP)
                             val aes = AES()
-                            val key = AES.keyFromBytes(keys.serverEncryptKey) // Use server key if we are client?
-                            // Note: In this simple symmetric setup, just ensure you use the correct matching key.
-                            // For simplicity in this demo, we try decrypting.
+
+                            // Try server key first (if we're the client)
                             try {
+                                val key = AES.keyFromBytes(keys.serverEncryptKey)
                                 val encryptedObj = AES.EncryptedMessage.fromBytes(data)
                                 val plain = aes.decryptToString(encryptedObj, key)
                                 addMessage(ChatMessage(plain, isFromMe = false))
+                                appendLog("<< Decrypted: $plain")
                                 showToast("Decrypted from $sender: $plain")
                             } catch (e: Exception) {
-                                // Try the other key if roles are confused
-                                val key2 = AES.keyFromBytes(keys.clientEncryptKey)
-                                val encryptedObj = AES.EncryptedMessage.fromBytes(data)
-                                val plain = aes.decryptToString(encryptedObj, key2)
-                                addMessage(ChatMessage(plain, isFromMe = false))
-                                showToast("Decrypted from $sender: $plain")
+                                // Try client key if server key fails
+                                try {
+                                    val key2 = AES.keyFromBytes(keys.clientEncryptKey)
+                                    val encryptedObj = AES.EncryptedMessage.fromBytes(data)
+                                    val plain = aes.decryptToString(encryptedObj, key2)
+                                    addMessage(ChatMessage(plain, isFromMe = false))
+                                    appendLog("<< Decrypted: $plain")
+                                    showToast("Decrypted from $sender: $plain")
+                                } catch (e2: Exception) {
+                                    appendLog("Error: Failed to decrypt message")
+                                    Log.e("SecureSMS_Protocol", "Decryption failed", e2)
+                                }
                             }
+                        } else {
+                            appendLog("Error: No session keys available")
                         }
                     }
+
                     else -> {
                         appendLog("Error: Unknown message type '$type'")
                     }
@@ -155,46 +206,43 @@ class SMSManager(private val context: Context) {
     }
 
     fun sendEncryptedMessage(peerPhone: String, message: String): String {
-        val handshake = handshakes[peerPhone] ?: return "Error: No handshake"
-        val keys = handshake.sessionKeys ?: return "Error: Not established"
+        val handshake = handshakes[peerPhone] ?: return "Error: No handshake with $peerPhone"
+        val keys = handshake.sessionKeys ?: return "Error: Handshake not complete"
 
         val aes = AES()
-        // Client uses Client Key to encrypt
+        // Client uses clientEncryptKey to encrypt
         val key = AES.keyFromBytes(keys.clientEncryptKey)
         val encrypted = aes.encrypt(message, key)
+
         addMessage(ChatMessage(message, isFromMe = true))
+
         val payload = Base64.encodeToString(encrypted.toBytes(), Base64.NO_WRAP)
         sendRawSMS(peerPhone, "MSG:$payload")
+        appendLog(">> Encrypted message sent")
+
         return "Sent"
     }
 
-    /*private fun sendRawSMS(phone: String, text: String) {
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
-            return
-        }
-        val smsManager = getSmsManager()
-        val parts = smsManager.divideMessage(text)
-        smsManager.sendMultipartTextMessage(phone, null, parts, null, null)
-    }*/
-
     private fun sendRawSMS(phone: String, text: String) {
         // 1. Log the "Cheat Code" for manual relay
-        // This prints the exact command you need to paste into the terminal
         Log.e("SecureSMS_Manual", ">>> RUN THIS COMMAND TO DELIVER MESSAGE:")
-        Log.e("SecureSMS_Manual", "adb -s emulator-$phone emu sms send 1234 \"$text\"")
+        Log.e("SecureSMS_Manual", "adb -s emulator-$phone emu sms send ${myPhoneNumber ?: "1234"} \"$text\"")
+        Log.e("SecureSMS_Manual", "")
 
-        // 2. Attempt real sending (in case it decides to work)
+        // 2. Attempt real sending
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
             appendLog("Error: Send Permission missing")
             return
         }
+
         try {
             val smsManager = getSmsManager()
             val parts = smsManager.divideMessage(text)
             smsManager.sendMultipartTextMessage(phone, null, parts, null, null)
-            appendLog(">> Message sent to network (Routing...)")
+            appendLog(">> Message sent to network")
         } catch (e: Exception) {
             appendLog("Error sending SMS: ${e.message}")
+            Log.e("SecureSMS_Protocol", "SMS send error", e)
         }
     }
 

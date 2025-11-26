@@ -1,7 +1,12 @@
 package com.example.securesms.crypto.asymmetric
 
+import AuthKeyPair
+import AuthPrivateKey
+import AuthPublicKey
+import AuthenticationProvider
 import android.os.Build
 import androidx.annotation.RequiresApi
+import com.example.securesms.crypto.hash.SHA256
 import com.example.securesms.crypto.utils.MathUtils
 import java.math.BigInteger
 import java.security.SecureRandom
@@ -173,5 +178,125 @@ class RSA {
     @RequiresApi(Build.VERSION_CODES.S)
     fun decryptNumber(ciphertext: BigInteger, privateKey: RSAPrivateKey): Long {
         return decrypt(ciphertext, privateKey).longValueExact()
+    }
+}
+
+/**
+ * RSA Authentication Provider
+ *
+ * Implements AuthenticationProvider interface for RSA-based authentication.
+ * Supports multiple key sizes with different security levels.
+ *
+ * Usage:
+ *   val provider = RSAAuthProvider(keySize = 2048)
+ *   val keyPair = provider.generateKeyPair()
+ *   val signature = provider.sign(data, privateKey)
+ *   val valid = provider.verify(data, signature, publicKey)
+ */
+class RSAAuthProvider(
+    override val keySize: Int = 2048
+) : AuthenticationProvider {
+
+    init {
+        require(keySize in listOf(1024, 2048, 3072, 4096)) {
+            "RSA key size must be 1024, 2048, 3072, or 4096 bits. Got: $keySize"
+        }
+    }
+
+    override val algorithm = "RSA-$keySize"
+
+    private val sha256 = SHA256()
+
+    /**
+     * Generate a new RSA key pair
+     */
+    override fun generateKeyPair(): AuthKeyPair {
+        val keyPair = RSA.generateKeyPair(keySize)
+        return AuthKeyPair.RSAAuth(keyPair)
+    }
+
+    /**
+     * Sign data with RSA private key
+     *
+     * Process:
+     * 1. Hash the data with SHA-256
+     * 2. Convert hash to BigInteger
+     * 3. Sign: signature = hash^d mod n (encrypt with private key)
+     */
+    override fun sign(data: ByteArray, privateKey: AuthPrivateKey): ByteArray {
+        require(privateKey is AuthPrivateKey.RSAAuth) {
+            "Expected RSA private key, got ${privateKey::class.simpleName}"
+        }
+
+        // Hash the data
+        val hash = sha256.hash(data)
+        val hashInt = BigInteger(1, hash)
+
+        // Sign: signature = hash^d mod n
+        val signature = MathUtils.modPow(hashInt, privateKey.key.d, privateKey.key.n)
+
+        return signature.toByteArray()
+    }
+
+    /**
+     * Verify RSA signature
+     *
+     * Process:
+     * 1. Hash the data with SHA-256
+     * 2. Decrypt signature: decrypted = signature^e mod n (decrypt with public key)
+     * 3. Compare decrypted hash with computed hash
+     */
+    override fun verify(data: ByteArray, signature: ByteArray, publicKey: AuthPublicKey): Boolean {
+        require(publicKey is AuthPublicKey.RSAAuth) {
+            "Expected RSA public key, got ${publicKey::class.simpleName}"
+        }
+
+        return try {
+            // Hash the data
+            val hash = sha256.hash(data)
+            val expectedHash = BigInteger(1, hash)
+
+            // Decrypt signature: decrypted = signature^e mod n
+            val signatureInt = BigInteger(1, signature)
+            val decryptedHash = MathUtils.modPow(signatureInt, publicKey.key.e, publicKey.key.n)
+
+            // Compare hashes
+            decryptedHash == expectedHash
+
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Get public key size in bytes
+     * RSA public key consists of (e, n)
+     * Size is primarily determined by modulus n
+     */
+    override fun getPublicKeySize(): Int {
+        // Modulus n takes keySize/8 bytes
+        // Public exponent e is typically small (3 bytes for 65537)
+        return (keySize / 8) + 4
+    }
+
+    /**
+     * Get signature size in bytes
+     * RSA signature is the same size as the modulus
+     */
+    override fun getSignatureSize(): Int {
+        return keySize / 8
+    }
+
+    /**
+     * Get security level in bits
+     */
+    fun getSecurityBits(): Int {
+        return when (keySize) {
+            1024 -> 80
+            2048 -> 112
+            3072 -> 128
+            4096 -> 152
+            else -> 0
+        }
     }
 }

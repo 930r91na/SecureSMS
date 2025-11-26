@@ -1,51 +1,77 @@
 package com.example.securesms.crypto.handshake
 
+import AuthKeyPair
+import AuthPrivateKey
+import AuthPublicKey
+import AuthenticationProvider
 import com.example.securesms.crypto.models.*
-import com.example.securesms.crypto.hash.SHA256
-import com.example.securesms.crypto.utils.MathUtils
-import java.math.BigInteger
 
-class CertificateManager {
-    private val sha256 = SHA256()
+/**
+ * Certificate Manager that works with any AuthenticationProvider
+ */
+class CertificateManager(
+    private val authProvider: AuthenticationProvider
+) {
 
-    fun generateSelfSignedCertificate(subject: String, keyPair: RSAKeyPair): Certificate {
+    /**
+     * Generate a self-signed certificate
+     *
+     * @param subject The certificate subject (e.g., phone number)
+     * @param keyPair The identity key pair (wrapped in AuthKeyPair)
+     * @return Self-signed certificate
+     */
+    fun generateSelfSignedCertificate(subject: String, keyPair: AuthKeyPair): Certificate {
         val validFrom = System.currentTimeMillis()
         val validTo = validFrom + 31536000000 // 1 year
 
-        // Data to sign
-        val dataStr = "$subject:${keyPair.publicKey.e}:${keyPair.publicKey.n}:$validFrom:$validTo"
-        val data = dataStr.toByteArray()
-        val hash = sha256.hash(data)
+        // Extract public key
+        val publicKey = when (keyPair) {
+            is AuthKeyPair.RSAAuth -> AuthPublicKey.RSAAuth(keyPair.keyPair.publicKey)
+            is AuthKeyPair.ECDSAAuth -> AuthPublicKey.ECDSAAuth(keyPair.keyPair.publicKey)
+        }
 
-        // RSA Sign: s = h^d mod n
-        val signatureInt = MathUtils.modPow(
-            BigInteger(1, hash),
-            keyPair.privateKey.d,
-            keyPair.privateKey.n
-        )
+        // Data to sign
+        val dataStr = "$subject:${authProvider.algorithm}:$validFrom:$validTo"
+        val data = dataStr.toByteArray()
+
+        // Sign using the authentication provider
+        val privateKey = when (keyPair) {
+            is AuthKeyPair.RSAAuth -> AuthPrivateKey.RSAAuth(keyPair.keyPair.privateKey)
+            is AuthKeyPair.ECDSAAuth -> AuthPrivateKey.ECDSAAuth(keyPair.keyPair.privateKey)
+        }
+
+        val signature = authProvider.sign(data, privateKey)
 
         return Certificate(
             subject = subject,
-            publicKey = keyPair.publicKey,
+            publicKey = publicKey,
+            algorithm = authProvider.algorithm,
             validFrom = validFrom,
             validTo = validTo,
             signatureData = data,
-            signature = signatureInt.toByteArray()
+            signature = signature
         )
     }
 
+    /**
+     * Verify a certificate
+     *
+     * @param cert The certificate to verify
+     * @return true if valid, false otherwise
+     */
     fun verifyCertificate(cert: Certificate): Boolean {
-        // RSA Verify: h' = s^e mod n, check if h' == hash(data)
-        val hash = sha256.hash(cert.signatureData)
-        val signatureInt = BigInteger(1, cert.signature)
+        // Check expiry
+        val now = System.currentTimeMillis()
+        if (now < cert.validFrom || now > cert.validTo) {
+            return false
+        }
 
-        val decryptedHash = MathUtils.modPow(
-            signatureInt,
-            cert.publicKey.e,
-            cert.publicKey.n
-        )
+        // Check algorithm matches
+        if (cert.algorithm != authProvider.algorithm) {
+            return false
+        }
 
-        // Simple comparison of BigIntegers to avoid padding issues with byte arrays
-        return decryptedHash == BigInteger(1, hash)
+        // Verify signature using the authentication provider
+        return authProvider.verify(cert.signatureData, cert.signature, cert.publicKey)
     }
 }
