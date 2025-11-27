@@ -4,6 +4,7 @@ import AuthKeyPair
 import AuthPrivateKey
 import AuthPublicKey
 import AuthenticationProvider
+import android.util.Log
 import com.example.securesms.crypto.models.*
 
 /**
@@ -63,11 +64,13 @@ class CertificateManager(
         // Check expiry
         val now = System.currentTimeMillis()
         if (now < cert.validFrom || now > cert.validTo) {
+            Log.d("SecureSMS_Protocol", "Certificate expired")
             return false
         }
 
         // Check algorithm matches
         if (cert.algorithm != authProvider.algorithm) {
+            Log.d("SecureSMS_Protocol", "Certificate algorithm mismatch")
             return false
         }
 

@@ -168,7 +168,7 @@ class TLSHandshake(
         check(state == HandshakeState.SERVER_HELLO_SENT) { "Invalid state for handling ClientKeyExchange" }
         transcript.append(msg.toString())
 
-        peerIdentityKey = msg.certificate.publicKey  // ✅ Now AuthPublicKey
+        peerIdentityKey = msg.certificate.publicKey
         peerEphemeralPublicKey = msg.ephemeralPublicKey
 
         // Verify Certificate

@@ -47,11 +47,7 @@ def monitor_device(serial):
             if match:
                 run_cmd = match.group(1)
                 
-                # === THE FIX ===
-                # The app hardcodes "1234" as the sender.
-                # We MUST replace "1234" with "my_port" so the receiver knows who sent it.
-                # This ensures handshakes["5556"] matches handshakes["5554"].
-                run_cmd = run_cmd.replace(" 1234 ", f" {my_port} ")
+                run_cmd = re.sub(r'(adb -s emulator-\d+ emu sms send )(?:1234|\d+)( ".*")', rf'\g<1>{my_port}\g<2>', run_cmd)
 
                 # Fix path if needed
                 if ADB_PATH != "adb" and run_cmd.startswith("adb"):

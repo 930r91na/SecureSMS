@@ -5,6 +5,7 @@ import AuthPrivateKey
 import AuthPublicKey
 import AuthenticationProvider
 import android.os.Build
+import android.util.Log
 import androidx.annotation.RequiresApi
 import com.example.securesms.crypto.hash.SHA256
 import com.example.securesms.crypto.models.*
@@ -290,6 +291,7 @@ class ECDSAAuthProvider(
             val ecdsaSig = ECDSASignature.fromBytes(signature, curve)
             ecdsa.verify(data, ecdsaSig, publicKey.key)
         } catch (e: Exception) {
+            Log.d("SecureSMS_Protocol", "ECDSA Signature verification failed")
             false
         }
     }

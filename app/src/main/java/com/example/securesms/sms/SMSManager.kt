@@ -132,7 +132,6 @@ class SMSManager(private val context: Context) {
                 val payload = parts[1].trim()
 
                 Log.d("SecureSMS_Protocol", "Message Type: '$type'")
-
                 when (type) {
                     "CL_HELLO" -> {
                         appendLog("Processing ClientHello...")
@@ -155,7 +154,7 @@ class SMSManager(private val context: Context) {
                         appendLog("Processing ClientKeyExchange...")
                         val msg = ClientKeyExchangeMessage.fromString(payload)
                         handshake.handleClientKeyExchange(msg)
-                        appendLog("✅ SECURE HANDSHAKE COMPLETE!")
+                        appendLog("SECURE HANDSHAKE COMPLETE!")
                         appendLog("Algorithm: ${handshake.getAuthAlgorithm()}")
                     }
 

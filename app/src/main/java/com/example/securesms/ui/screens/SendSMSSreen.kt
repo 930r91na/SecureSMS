@@ -39,8 +39,8 @@ fun SendSMSScreen() {
     val scope = rememberCoroutineScope()
     val smsManager = remember { SMSManager(context) }
 
-    var myPhone by remember { mutableStateOf("5554") } // Default emulator port
-    var peerPhone by remember { mutableStateOf("5556") } // Default target
+    var myPhone by remember { mutableStateOf("5556") } // Default emulator port
+    var peerPhone by remember { mutableStateOf("5554") } // Default target
     var messageText by remember { mutableStateOf("") }
 
     // Algorithm selection
