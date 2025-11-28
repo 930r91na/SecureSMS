@@ -82,6 +82,9 @@ private fun getCurveByName(name: String): ECCCurve {
     return when (name) {
         "secp256k1-like" -> com.example.securesms.crypto.asymmetric.ECC.getSecureCurve()
         "P-256" -> com.example.securesms.crypto.asymmetric.ECC.getP256Curve()
+        "P-224" -> com.example.securesms.crypto.asymmetric.ECC.getP224Curve()
+        "P-384" -> com.example.securesms.crypto.asymmetric.ECC.getP384Curve()
+        "P-521" -> com.example.securesms.crypto.asymmetric.ECC.getP521Curve()
         "Test-Curve-17" -> com.example.securesms.crypto.asymmetric.ECC.getTestCurve()
         else -> throw IllegalArgumentException("Unknown curve: $name")
     }

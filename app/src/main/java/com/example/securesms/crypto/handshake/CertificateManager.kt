@@ -61,29 +61,41 @@ class CertificateManager(
      * @return true if valid, false otherwise
      */
     fun verifyCertificate(cert: Certificate): Boolean {
-
         val now = System.currentTimeMillis()
 
-        // Check expiry
+        val CLOCK_SKEW_TOLERANCE_MS = 50000L
+
         Log.d("SecureSMS_Cert", "Certificate verification:")
         Log.d("SecureSMS_Cert", "  Current time:  $now")
         Log.d("SecureSMS_Cert", "  Valid from:    ${cert.validFrom}")
         Log.d("SecureSMS_Cert", "  Valid to:      ${cert.validTo}")
-        Log.d("SecureSMS_Cert", "  Is expired?    ${now < cert.validFrom || now > cert.validTo}")
 
+        val isExpired = now < (cert.validFrom - CLOCK_SKEW_TOLERANCE_MS) || now > cert.validTo
 
-        if (now < cert.validFrom || now > cert.validTo) {
+        Log.d("SecureSMS_Cert", "  Is expired?    $isExpired")
+
+        if (isExpired) {
             Log.d("SecureSMS_Protocol", "Certificate expired")
             return false
         }
 
-        // Check algorithm matches
+        Log.d("SecureSMS_Cert", "Algorithm check:")
+        Log.d("SecureSMS_Cert", "  Certificate algorithm: ${cert.algorithm}")
+        Log.d("SecureSMS_Cert", "  Provider algorithm:    ${authProvider.algorithm}")
+        Log.d("SecureSMS_Cert", "  Match? ${cert.algorithm == authProvider.algorithm}")
+
         if (cert.algorithm != authProvider.algorithm) {
             Log.d("SecureSMS_Protocol", "Certificate algorithm mismatch")
             return false
         }
 
-        // Verify signature using the authentication provider
-        return authProvider.verify(cert.signatureData, cert.signature, cert.publicKey)
+        Log.d("SecureSMS_Cert", "Signature verification:")
+        Log.d("SecureSMS_Cert", "  Signature data: ${cert.signatureData.size} bytes")
+        Log.d("SecureSMS_Cert", "  Signature: ${cert.signature.size} bytes")
+
+        val verifyResult = authProvider.verify(cert.signatureData, cert.signature, cert.publicKey)
+        Log.d("SecureSMS_Cert", "  Verification result: $verifyResult")
+
+        return verifyResult
     }
 }

@@ -207,18 +207,42 @@ data class ECDSASignature(
     val curve: ECCCurve
 ) {
     fun toBytes(): ByteArray {
-        // Encode as r || s
+        val keySize = (curve.n.bitLength() + 7) / 8  // 32 bytes for P-256
+
         val rBytes = r.toByteArray()
         val sBytes = s.toByteArray()
-        return rBytes + sBytes
+
+        // Remove leading zero byte if present (sign byte)
+        val rFixed = if (rBytes.size > keySize && rBytes[0] == 0.toByte()) {
+            rBytes.copyOfRange(1, rBytes.size)
+        } else {
+            rBytes
+        }
+
+        val sFixed = if (sBytes.size > keySize && sBytes[0] == 0.toByte()) {
+            sBytes.copyOfRange(1, sBytes.size)
+        } else {
+            sBytes
+        }
+
+        // Pad with zeros if too short
+        val rPadded = ByteArray(keySize).apply {
+            System.arraycopy(rFixed, 0, this, keySize - rFixed.size, rFixed.size)
+        }
+
+        val sPadded = ByteArray(keySize).apply {
+            System.arraycopy(sFixed, 0, this, keySize - sFixed.size, sFixed.size)
+        }
+
+        return rPadded + sPadded
     }
 
     companion object {
         fun fromBytes(data: ByteArray, curve: ECCCurve): ECDSASignature {
             // Split at midpoint
             val mid = data.size / 2
-            val r = BigInteger(1, data.sliceArray(0 until mid))
-            val s = BigInteger(1, data.sliceArray(mid until data.size))
+            val r = BigInteger(1, data.sliceArray(0 until mid))  // ✅ Use unsigned constructor
+            val s = BigInteger(1, data.sliceArray(mid until data.size))  // ✅ Use unsigned constructor
             return ECDSASignature(r, s, curve)
         }
     }
@@ -288,7 +312,7 @@ class ECDSAAuthProvider(
         }
 
         return try {
-            val ecdsaSig = ECDSASignature.fromBytes(signature, curve)
+            val ecdsaSig = ECDSASignature.fromBytes(signature, publicKey.key.curve)
             ecdsa.verify(data, ecdsaSig, publicKey.key)
         } catch (e: Exception) {
             Log.d("SecureSMS_Protocol", "ECDSA Signature verification failed")

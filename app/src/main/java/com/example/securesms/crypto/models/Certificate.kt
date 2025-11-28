@@ -38,7 +38,7 @@ data class Certificate(
 
         sb.append("FROM=$validFrom;")
         sb.append("TO=$validTo;")
-        sb.append("SIG=${signature.toHex()};")
+        sb.append("SIG=${signature.toHex()}")
         return sb.toString().toByteArray()
     }
 
