@@ -9,6 +9,7 @@ import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
@@ -23,6 +24,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.example.securesms.ui.screens.PerformanceTestScreen
 import com.example.securesms.ui.screens.SendSMSScreen
 import com.example.securesms.ui.screens.TestsScreen
 import com.example.securesms.ui.theme.SecureSMSTheme
@@ -72,6 +74,10 @@ fun SecureSMSApp() {
 
                 }
 
+                AppDestinations.PERFORMANCE -> {
+                    PerformanceTestScreen()
+                }
+
             }
         }
     }
@@ -83,4 +89,6 @@ enum class AppDestinations(
 ) {
     TESTS("Tests", Icons.Default.Create),
     SEND_SMS("Send SMS", Icons.Default.Send),
+
+    PERFORMANCE("Performance", Icons.Default.Add),
 }

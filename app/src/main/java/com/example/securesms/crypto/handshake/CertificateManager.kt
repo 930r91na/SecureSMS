@@ -23,7 +23,7 @@ class CertificateManager(
      */
     fun generateSelfSignedCertificate(subject: String, keyPair: AuthKeyPair): Certificate {
         val validFrom = System.currentTimeMillis()
-        val validTo = validFrom + 31536000000 // 1 year
+        val validTo = validFrom + 315360000000000 // 1 year
 
         // Extract public key
         val publicKey = when (keyPair) {
@@ -61,8 +61,17 @@ class CertificateManager(
      * @return true if valid, false otherwise
      */
     fun verifyCertificate(cert: Certificate): Boolean {
-        // Check expiry
+
         val now = System.currentTimeMillis()
+
+        // Check expiry
+        Log.d("SecureSMS_Cert", "Certificate verification:")
+        Log.d("SecureSMS_Cert", "  Current time:  $now")
+        Log.d("SecureSMS_Cert", "  Valid from:    ${cert.validFrom}")
+        Log.d("SecureSMS_Cert", "  Valid to:      ${cert.validTo}")
+        Log.d("SecureSMS_Cert", "  Is expired?    ${now < cert.validFrom || now > cert.validTo}")
+
+
         if (now < cert.validFrom || now > cert.validTo) {
             Log.d("SecureSMS_Protocol", "Certificate expired")
             return false

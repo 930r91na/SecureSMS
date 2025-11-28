@@ -43,15 +43,16 @@ fun SendSMSScreen() {
     var peerPhone by remember { mutableStateOf("5554") } // Default target
     var messageText by remember { mutableStateOf("") }
 
-    // Algorithm selection
     var useECDSA by remember { mutableStateOf(true) } // Default to ECDSA
+    var rsaKeySize by remember { mutableStateOf(2048) } // RSA key size
+    var ecdsaCurve by remember { mutableStateOf(ECDSAAuthProvider.CurveType.P256) } // ECDSA curve
     var isInitialized by remember { mutableStateOf(false) }
     var showAlgorithmDialog by remember { mutableStateOf(false) }
 
-    // Observe Data
     val logs by SMSManager.logState.collectAsState()
     val messages by SMSManager.messageState.collectAsState()
     val listState = rememberLazyListState()
+    val logListState = rememberLazyListState()
 
     // Permission launcher
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -71,9 +72,9 @@ fun SendSMSScreen() {
         if (SMSManager.authProvider == null) {
             withContext(Dispatchers.Default) {
                 val authProvider = if (useECDSA) {
-                    ECDSAAuthProvider(ECDSAAuthProvider.CurveType.P256)
+                    ECDSAAuthProvider(ecdsaCurve)
                 } else {
-                    RSAAuthProvider(2048)
+                    RSAAuthProvider(rsaKeySize)
                 }
                 smsManager.initializeAuth(myPhone, authProvider)
             }
@@ -90,22 +91,34 @@ fun SendSMSScreen() {
         }
     }
 
+    // Auto-scroll to bottom of logs
+    LaunchedEffect(logs.size) {
+        if (logs.isNotEmpty()) {
+            logListState.animateScrollToItem(maxOf(0, logs.takeLast(20).size - 1))
+        }
+    }
+
     // Algorithm selection dialog
     if (showAlgorithmDialog) {
         AlgorithmSelectionDialog(
             currentUseECDSA = useECDSA,
+            currentRSAKeySize = rsaKeySize,
+            currentECDSACurve = ecdsaCurve,
             onDismiss = { showAlgorithmDialog = false },
-            onConfirm = { newUseECDSA ->
+            onConfirm = { newUseECDSA, newRSAKeySize, newECDSACurve ->
                 useECDSA = newUseECDSA
+                rsaKeySize = newRSAKeySize
+                ecdsaCurve = newECDSACurve
+
                 scope.launch(Dispatchers.Default) {
                     // Clear existing handshakes
                     SMSManager.handshakes.clear()
 
                     // Reinitialize with new algorithm
                     val authProvider = if (newUseECDSA) {
-                        ECDSAAuthProvider(ECDSAAuthProvider.CurveType.P256)
+                        ECDSAAuthProvider(newECDSACurve)
                     } else {
-                        RSAAuthProvider(2048)
+                        RSAAuthProvider(newRSAKeySize)
                     }
                     smsManager.initializeAuth(myPhone, authProvider)
                 }
@@ -148,18 +161,32 @@ fun SendSMSScreen() {
                         modifier = Modifier.weight(1f),
                         singleLine = true
                     )
+
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            scope.launch(Dispatchers.IO) {
-                                smsManager.initiateHandshake(peerPhone)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Button(
+                            onClick = {
+                                scope.launch(Dispatchers.IO) {
+                                    smsManager.initiateHandshake(peerPhone)
+                                }
+                            },
+                            enabled = isInitialized
+                        ) {
+                            Icon(Icons.Default.Lock, contentDescription = "Initiate Handshake")
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Handshake")
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Button(
+                            onClick = {
+                                SMSManager.handshakes.clear()
+                                SMSManager.appendLog("Cleared all handshakes - fresh certificates will be generated")
                             }
-                        },
-                        enabled = isInitialized
-                    ) {
-                        Icon(Icons.Default.Lock, contentDescription = "Initiate Handshake")
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Handshake")
+                        ) {
+                            Text("Clear Handshakes")
+                        }
                     }
                 }
             }
@@ -188,6 +215,7 @@ fun SendSMSScreen() {
             modifier = Modifier.padding(8.dp)
         )
         LazyColumn(
+            state = logListState,
             modifier = Modifier
                 .height(100.dp)
                 .fillMaxWidth()
@@ -228,6 +256,8 @@ fun SendSMSScreen() {
                 ) {
                     Icon(Icons.Default.Send, contentDescription = "Send Message")
                 }
+
+
             }
         }
     }
@@ -257,26 +287,35 @@ fun ChatBubble(message: ChatMessage) {
     }
 }
 
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @Composable
 fun AlgorithmSelectionDialog(
     currentUseECDSA: Boolean,
+    currentRSAKeySize: Int,
+    currentECDSACurve: ECDSAAuthProvider.CurveType,
     onDismiss: () -> Unit,
-    onConfirm: (Boolean) -> Unit
+    onConfirm: (Boolean, Int, ECDSAAuthProvider.CurveType) -> Unit
 ) {
     var selectedUseECDSA by remember { mutableStateOf(currentUseECDSA) }
+    var selectedRSAKeySize by remember { mutableStateOf(currentRSAKeySize) }
+    var selectedECDSACurve by remember { mutableStateOf(currentECDSACurve) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Select Authentication Algorithm") },
         text = {
-            Column {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Text(
                     "Choose the algorithm for authentication:",
                     style = MaterialTheme.typography.bodyMedium
                 )
-                Spacer(modifier = Modifier.height(16.dp))
 
-                // ECDSA Option
+                Divider()
+
+                // ========== ECDSA Section ==========
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -286,22 +325,94 @@ fun AlgorithmSelectionDialog(
                         onClick = { selectedUseECDSA = true }
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Column {
+                    Text(
+                        "ECDSA (Elliptic Curve)",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+
+                if (selectedUseECDSA) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 40.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         Text(
-                            "ECDSA-P256 (Recommended)",
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        Text(
-                            "Fast, small signatures, 128-bit security",
+                            "Select Curve:",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+
+                        // P-256 (Recommended)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = selectedECDSACurve == ECDSAAuthProvider.CurveType.P256,
+                                onClick = { selectedECDSACurve = ECDSAAuthProvider.CurveType.P256 }
+                            )
+                            Column {
+                                Text("P-256 (Recommended)", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "256-bit, ~128-bit security, fast",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+
+                        // P-224
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = selectedECDSACurve == ECDSAAuthProvider.CurveType.P224,
+                                onClick = { selectedECDSACurve = ECDSAAuthProvider.CurveType.P224 }
+                            )
+                            Column {
+                                Text("P-224", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "224-bit, ~112-bit security",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+
+                        // P-384
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = selectedECDSACurve == ECDSAAuthProvider.CurveType.P384,
+                                onClick = { selectedECDSACurve = ECDSAAuthProvider.CurveType.P384 }
+                            )
+                            Column {
+                                Text("P-384 (High Security)", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "384-bit, ~192-bit security, slower",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+
+                        // P-521
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = selectedECDSACurve == ECDSAAuthProvider.CurveType.P521,
+                                onClick = { selectedECDSACurve = ECDSAAuthProvider.CurveType.P521 }
+                            )
+                            Column {
+                                Text("P-521 (Maximum Security)", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "521-bit, ~256-bit security, slowest",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Divider()
 
-                // RSA Option
+                // ========== RSA Section ==========
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -311,31 +422,114 @@ fun AlgorithmSelectionDialog(
                         onClick = { selectedUseECDSA = false }
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Column {
+                    Text(
+                        "RSA (Traditional)",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+
+                if (!selectedUseECDSA) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 40.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         Text(
-                            "RSA-2048",
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        Text(
-                            "Traditional, larger signatures, 112-bit security",
+                            "Select Key Size:",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+
+                        // RSA-1024 (Fast, not recommended)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = selectedRSAKeySize == 1024,
+                                onClick = { selectedRSAKeySize = 1024 }
+                            )
+                            Column {
+                                Text("1024-bit (Not Recommended)", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "~80-bit security, fast but weak",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+
+                        // RSA-2048 (Standard)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = selectedRSAKeySize == 2048,
+                                onClick = { selectedRSAKeySize = 2048 }
+                            )
+                            Column {
+                                Text("2048-bit (Standard)", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "~112-bit security, good balance",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+
+                        // RSA-3072
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = selectedRSAKeySize == 3072,
+                                onClick = { selectedRSAKeySize = 3072 }
+                            )
+                            Column {
+                                Text("3072-bit (High Security)", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "~128-bit security, slower",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+
+                        // RSA-4096
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = selectedRSAKeySize == 4096,
+                                onClick = { selectedRSAKeySize = 4096 }
+                            )
+                            Column {
+                                Text("4096-bit (Maximum Security)", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "~152-bit security, very slow",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
                     }
                 }
 
-                if (selectedUseECDSA != currentUseECDSA) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        "⚠️ Changing algorithm will clear all handshakes",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
+                // Warning if settings changed
+                if (selectedUseECDSA != currentUseECDSA ||
+                    selectedRSAKeySize != currentRSAKeySize ||
+                    selectedECDSACurve != currentECDSACurve) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            "⚠️ Changing settings will clear all handshakes",
+                            modifier = Modifier.padding(8.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
                 }
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(selectedUseECDSA) }) {
+            Button(onClick = {
+                onConfirm(selectedUseECDSA, selectedRSAKeySize, selectedECDSACurve)
+            }) {
                 Text("Apply")
             }
         },
